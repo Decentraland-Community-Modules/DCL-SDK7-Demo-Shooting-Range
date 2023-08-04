@@ -1,6 +1,6 @@
 # Shooting Range
-_demo of shooting-range scene running in preview._
 
+![preview](https://github.com/TheCryptoTrader69/SDK7-Shooting-Range/blob/main/images/preview.gif)
 
 ## Description
 Basic gun game mechanic along with bullet marks and pop up scores.
