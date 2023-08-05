@@ -23,9 +23,15 @@ export module TargetObject {
 	var pooledObjects:Entity[][] = [[],[]];
 
 	/** object interface used to define all data required to create a new target object */
-	export interface TargetDataObject {
-		type: TARGET_TYPE;
+	export interface TargetStaticDataObject {
+		type: TARGET_TYPE.STATIC;
 		pos: { x:number; y:number; z:number; };
+	}
+	/** object interface used to define all data required to create a new target object */
+	export interface TargetMovingDataObject {
+		type: TARGET_TYPE.MOVING;
+		speed: number;
+		waypoints: {x:number;y:number;z:number;}[];
 	}
 
 	/** component data def for static targets, this will exist attached on the object's entity as a component */
@@ -71,6 +77,7 @@ export module TargetObject {
 				//update target
 				component.indexCur++;
 				if(component.indexCur >= component.waypoints.length) component.indexCur = 0;
+				
 				//determine new direction that object has to move in
 				const direction = {
 					x: component.waypoints[component.indexCur].x - pos.x,
@@ -80,11 +87,13 @@ export module TargetObject {
 				//recalculate norm translation
 				const length = Math.sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
 				component.normal = {
-				x: direction.x / length,
-				y: direction.y / length,
-				z: direction.z / length
+					x: direction.x / length,
+					y: direction.y / length,
+					z: direction.z / length
 				};
 			}
+			//if(isDebugging) console.log("Target Object: waypoint="+component.indexCur
+			//	+", x="+pos.x+", y="+pos.y+", z="+pos.z);
 			//move towards target location
 			pos.x += (dt*component.speed*component.normal.x);
 			pos.y += (dt*component.speed*component.normal.y);
@@ -95,75 +104,77 @@ export module TargetObject {
 	engine.addSystem(targetProcessingMoving);
 
 	/** creates a new target object, returning reference to its entity (this handles the creation of the entity as well so ns can handle pooling) */
-	export function Create(targetData:TargetDataObject):Entity {
-		if(isDebugging) console.log("Target Object: attempting to create object of type="+targetData.type+" at pos(x="+targetData.pos.x+", y="+targetData.pos.y+", z="+targetData.pos.z+")...");
+	export function Create(data:TargetStaticDataObject|TargetMovingDataObject):Entity {
+		if(isDebugging) console.log("Target Object: attempting to create object of type="+data.type+"...");
 
 		//attempt to find pre-existing component
-		var reused:undefined|Entity = undefined; 
-		for (let i = 0; i < pooledObjects[targetData.type].length; i++) {
+		var entity:undefined|Entity = undefined; 
+		for (let i = 0; i < pooledObjects[data.type].length; i++) {
 			//process based on component type we are after 
-			switch(targetData.type) {
+			switch(data.type) {
 				case TARGET_TYPE.STATIC:
-					if(!TargetStaticComponent.get(pooledObjects[targetData.type][i]).isActive) reused = Enable(pooledObjects[targetData.type][i], targetData);
+					if(!TargetStaticComponent.get(pooledObjects[data.type][i]).isActive) entity = Enable(pooledObjects[data.type][i], data);
 				break;
 				case TARGET_TYPE.MOVING:
-					if(!TargetMovingComponent.get(pooledObjects[targetData.type][i]).isActive) reused = Enable(pooledObjects[targetData.type][i], targetData);
+					if(!TargetMovingComponent.get(pooledObjects[data.type][i]).isActive) entity = Enable(pooledObjects[data.type][i], data);
 				break;
 			}
-			if(reused != undefined) {
+			if(entity != undefined) {
 				if(isDebugging) console.log("Target Object: recycled unused object!");
-				return reused;
+				break;
 			}
 		}
-
-		//create object
-		//  create entity
-		const entity = engine.addEntity();
-		Transform.create(entity, {
-			position: {x:targetData.pos.x, y:targetData.pos.y, z:targetData.pos.z}
-		});
+		if(!entity) {
+			if(isDebugging) console.log("Target Object: created new object!");
+			//create object
+			//  create entity
+			entity = engine.addEntity();
+			//  add custom model
+			GltfContainer.create(entity, {
+				src: MODEL_TARGET_OBJECT,
+				visibleMeshesCollisionMask: ColliderLayer.CL_POINTER,
+				invisibleMeshesCollisionMask: undefined
+			});
+		}
 		
-		//  add custom model
-		GltfContainer.create(entity, {
-			src: MODEL_TARGET_OBJECT,
-			visibleMeshesCollisionMask: ColliderLayer.CL_POINTER,
-			invisibleMeshesCollisionMask: undefined
-		});
-		//  add requested component type, initialized by type
-		switch(targetData.type)
+		//add requested component type, initialized by type
+		switch(data.type)
 		{
 			case TARGET_TYPE.STATIC:
-				TargetStaticComponent.create(entity,{ isActive: true });
+				//update position
+				Transform.getOrCreateMutable(entity).position = data.pos;
+				//update component
+				const compStatic = TargetStaticComponent.getOrCreateMutable(entity);
+				compStatic.isActive = true;
 			break;
 			case TARGET_TYPE.MOVING:
-				TargetMovingComponent.create(entity,{ isActive: true, isProcessing: false });
+				//update position
+				Transform.getOrCreateMutable(entity).position = data.waypoints[0];
+				//update component
+				const compMoving = TargetMovingComponent.getOrCreateMutable(entity);
+				compMoving.isActive = true;
+				compMoving.isProcessing = true;
+				compMoving.speed = data.speed;
+				compMoving.indexCur = 0;
+				compMoving.waypoints = [];
+				//	note: we cannot take these data objects in by reference, we must assert them
+				for(let i=0; i<data.waypoints.length; i++) {
+					compMoving.waypoints.push({x:data.waypoints[i].x,y:data.waypoints[i].y,z:data.waypoints[i].z});
+				}
+				if(isDebugging) console.log("Target Object: "+compMoving.waypoints.length+", "+data.waypoints.length);
 			break;
 		}
 
 		//add entity to pooling
-		pooledObjects[targetData.type].push(entity);
+		pooledObjects[data.type].push(entity);
 		if(isDebugging) console.log("Target Object: created new object!");
 		//provide entity reference
 		return entity;
   	}
 
 	/** enables the given object with the provided settings (assumes object was previously disabled) */
-	export function Enable(entity:Entity, targetData:TargetDataObject):Entity {
+	export function Enable(entity:Entity, data:TargetStaticDataObject|TargetMovingDataObject):Entity {
 		if(isDebugging) console.log("Target Object: re-enabling unused object...");
-		
-		//reactivate requested component, initialized by type
-		switch(targetData.type)
-		{
-			case TARGET_TYPE.STATIC:
-				TargetStaticComponent.getMutable(entity).isActive = true;
-			break;
-			case TARGET_TYPE.MOVING:
-				TargetMovingComponent.getMutable(entity).isActive = true;
-			break;
-		}
-		
-		//place objects
-		Transform.getMutable(entity).position = { x:targetData.pos.x, y:targetData.pos.y, z:targetData.pos.z }; 
 
 		//enable object (soft-state work-around)
 		Transform.getMutable(entity).scale = { x:1, y:1, z:1 }; 

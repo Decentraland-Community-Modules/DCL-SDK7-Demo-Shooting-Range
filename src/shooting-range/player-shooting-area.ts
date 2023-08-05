@@ -203,6 +203,6 @@ export module PlayerShootingArea {
     export function Move(mod:ShootingAreaTransformData) {
         if(isDebugging) console.log("Shooting Area: object moved to pos(x="+mod.x+", y="+mod.y+", z="+mod.z+")");
         Transform.getMutable(GetSurfaceObject()).position = mod;
-        Transform.getMutable(shootingFloorEntity).position = {x:mod.x,y:mod.y-0.5,z:mod.z};        
+        Transform.getMutable(shootingFloorEntity).position = {x:mod.x,y:mod.y-0.45,z:mod.z};        
     }
 }
